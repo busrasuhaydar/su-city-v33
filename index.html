@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v33</title>
+    <title>SU CITY · Deniz Şehri · v34</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -3412,9 +3412,11 @@ canvas{touch-action:none}
                 col += glassGreen * absb * 0.16 * (0.6 + 0.4 * dot(env, vec3(0.333)));
                 float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.22 + mix(absb, 0.3, kFar) * 0.22, 0.04, 0.92);
                 // v33 · gece camın içinde yumuşak ay-mavisi kenar ışığı: yollar karanlıkta da zarifçe okunur (uzakta sakin, titremez)
-                float eg = uEdgeGlow * uNight; col += vec3(0.42, 0.66, 1.0) * eg * (0.05 + 0.32 * pow(1.0 - ndv, 2.5) * (1.0 - 0.6 * kFar)); a = max(a, 0.1 * eg + a);
+                float eg = uEdgeGlow * uNight; float rimL = smoothstep(0.86, 0.985, 1.0 - ndv) * (1.0 - 0.45 * kFar);
+                col *= 1.0 - 0.75 * eg; a *= 1.0 - 0.8 * eg; // gece cam renksiz ve şeffaf
+                col += vec3(1.0, 0.9, 0.76) * rimL * eg * 0.7; a = max(a, rimL * eg * 0.65); // kenarlarda ince, sıcak ışık çizgisi
                 float fogF = 1.0 - exp(-uFogD * uFogD * vFogDepth * vFogDepth);
-                col = mix(col, uFogColor * a, fogF);
+                col = mix(col, uFogColor * a * (1.0 - 0.85 * uNight * uEdgeGlow), fogF);
                 gl_FragColor = vec4(col, a);
             }`;
         const LG = {
@@ -6051,7 +6053,8 @@ canvas{touch-action:none}
                 const o2 = A.createOscillator(); o2.frequency.setValueAtTime(210, t); o2.frequency.exponentialRampToValueAtTime(95, t + .05); const g2 = A.createGain(); g2.gain.setValueAtTime(.32, t); g2.gain.exponentialRampToValueAtTime(.0001, t + .07); o2.connect(g2).connect(out); o2.start(t); o2.stop(t + .09);
             } catch (e) {}
         }
-        ['pointerdown', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { try { if (window.__suAC && window.__suAC.state === 'suspended') window.__suAC.resume(); else if (!window.__suAC) window.__suAC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }, { once: true, passive: true }));
+        const suUnlock = () => { try { const A = window.__suAC || (window.__suAC = new (window.AudioContext || window.webkitAudioContext)()); if (A.state !== 'running') A.resume(); const b = A.createBuffer(1, 1, 22050), s = A.createBufferSource(); s.buffer = b; s.connect(A.destination); s.start(0); if (A.state === 'running') ['touchend', 'pointerup', 'click', 'keydown'].forEach(ev => window.removeEventListener(ev, suUnlock, true)); } catch (e) {} };
+        ['touchend', 'pointerup', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, suUnlock, true)); // v34 · telefonda ses: gerçek dokunuşta ses motoru açılır
         // 40 sn hiçbir şeye dokunulmazsa: ruh kameraya doğru yürür, yüzünü döner, cama iki kez tıklar, el sallar, geri döner
         const IDLE = { last: performance.now() };
         ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'].forEach(ev => window.addEventListener(ev, e => { if (ev === 'pointermove' && !e.buttons) return; IDLE.last = performance.now(); if (KNOCK.phase) KNOCK.abort(); }, { passive: true }));
@@ -6185,7 +6188,7 @@ canvas{touch-action:none}
                 CAM.ahead.lerp(_cf, 1 - Math.exp(-dt * 2.2));
                 const pivH = 2.05 + 0.95 * (1 - Math.max(0, Math.min(1, (CAM.dist - 4.5) / 9))); // v32 · yaklaştıkça kadraj yüze çıkar
                 _cl.set(car.position.x + CAM.ahead.x, car.position.y + pivH, car.position.z + CAM.ahead.z);
-                smoothDampV(CAM.pivot, _cl, CAM.pivV, 0.1, dt);
+                smoothDampV(CAM.pivot, _cl, CAM.pivV, CAM.lock ? 0.1 : 0.05, dt);
                 // v5 · takip: ruh yürürken ya da dönerken kamera hep arkasına yerleşir (kovalayan kamera). Kullanıcı sürüklediyse
                 // 1.6 sn dokunulmaz; dururken kullanıcının seçtiği açı korunur.
                 const active = sp > 0.3 || Math.abs(MOVE.turn) > 0.05;
@@ -6218,13 +6221,13 @@ canvas{touch-action:none}
                 if (!user && !CAM.lock && !CAM.freeze) { // v33 · açıyı değiştirmediğin sürece kamera her an ruhun arkasında (ruhun gözünden gibi)
                     // v27 · iskelet kameraya göre yürür: kamera yalnız iskelet ekranın içine doğru yürürken arkasına hizalanır;
                     // yana ya da sana doğru yürürken kamera dönmez (aksi hâlde sola basınca daireler çizerdi)
-                    const awayK = spirit && spirit.skel ? (function (d) { d = Math.abs(d); return d > 0.6 ? 0 : d < 0.18 ? 1 : 1 - (d - 0.18) / 0.42; })(wrapA(baseYaw - CAM.yaw)) * (Math.abs(MOVE.turn) > 0.5 ? 0 : 1) : 1; // v32 · kamera yalnız ruh gerçekten ileri giderken arkasına süzülür; dönüşte sürüklenmez
+                    const awayK = !CAM.lock ? 1 : spirit && spirit.skel ? (function (d) { d = Math.abs(d); return d > 0.6 ? 0 : d < 0.18 ? 1 : 1 - (d - 0.18) / 0.42; })(wrapA(baseYaw - CAM.yaw)) * (Math.abs(MOVE.turn) > 0.5 ? 0 : 1) : 1; // v32 · kamera yalnız ruh gerçekten ileri giderken arkasına süzülür; dönüşte sürüklenmez
                     CAM.yawT = CAM.yaw + wrapA(baseYaw - CAM.yaw) * awayK;
                     if (active) CAM.pitchT += (0.22 - CAM.pitchT) * (1 - Math.exp(-dt * 1.2));
                 }
                 // açılar ve mesafe: kritik sönümlü yaylar. Büyük açı farkında (kullanıcı başka yöne baktıktan sonra) daha sakin döner.
                 const yawGap = Math.abs(wrapA(CAM.yawT - CAM.yaw));
-                [CAM.yaw, CAM.yawV] = smoothDamp(CAM.yaw, CAM.yaw + wrapA(CAM.yawT - CAM.yaw), CAM.yawV, user ? 0.07 : (0.28 + 0.3 * Math.max(0, Math.min(1, (yawGap - 0.8) / 1.4))), dt);
+                [CAM.yaw, CAM.yawV] = smoothDamp(CAM.yaw, CAM.yaw + wrapA(CAM.yawT - CAM.yaw), CAM.yawV, user ? 0.07 : (!CAM.lock ? 0.045 : 0.28), dt); // v34 · serbestken kamera ruhla eş zamanlı döner
                 CAM.yaw = wrapA(CAM.yaw); CAM.yawT = CAM.yaw + wrapA(CAM.yawT - CAM.yaw);
                 [CAM.pitch, CAM.pitchV] = smoothDamp(CAM.pitch, CAM.pitchT, CAM.pitchV, user ? 0.07 : 0.2, dt);
                 const distGoal = CAM.distT * (1 + 0.16 * spK) * (cameraMode === 3 ? 0.95 : 1);
