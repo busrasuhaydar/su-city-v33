@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05080e">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>SU CITY · Deniz Şehri · v34</title>
+    <title>SU CITY · Deniz Şehri · v35</title>
     <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         canvas { display: block; touch-action: none; }
@@ -1638,7 +1638,7 @@ canvas{touch-action:none}
                 const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setIndex(new THREE.BufferAttribute(I, 1)); g.computeVertexNormals(); return g;
             };
             const glassRoads = new THREE.Mesh(ribbon(GLASS_PROFILE, 0), MAT.roadGlass);
-            glassRoads.renderOrder = 6; glassRoads.matrixAutoUpdate = false; glassRoads.updateMatrix(); scene.add(glassRoads); LG.meshes.push(glassRoads);
+            glassRoads.renderOrder = 6; hiddenInMirror.push(glassRoads); glassRoads.matrixAutoUpdate = false; glassRoads.updateMatrix(); scene.add(glassRoads); LG.meshes.push(glassRoads);
             PAINT.geos.push(ribbon(GLASS_PROFILE.slice(2, 11), 0.035));
             const nodeGeo = new THREE.CylinderGeometry(NR, NR, 0.97, 72);
             const nodeTop = new THREE.RingGeometry(0.05, NR - 0.15, 48, 8); nodeTop.rotateX(-Math.PI / 2);
@@ -3412,7 +3412,7 @@ canvas{touch-action:none}
                 col += glassGreen * absb * 0.16 * (0.6 + 0.4 * dot(env, vec3(0.333)));
                 float a = clamp(uTintA * 0.8 + uFrost * 0.35 + F * 0.55 + bezel * 0.22 + mix(absb, 0.3, kFar) * 0.22, 0.04, 0.92);
                 // v33 · gece camın içinde yumuşak ay-mavisi kenar ışığı: yollar karanlıkta da zarifçe okunur (uzakta sakin, titremez)
-                float eg = uEdgeGlow * uNight; float rimL = smoothstep(0.86, 0.985, 1.0 - ndv) * (1.0 - 0.45 * kFar);
+                float eg = uEdgeGlow * uNight; float rimL = (smoothstep(0.55, 0.97, 1.0 - ndv) * 0.55 + smoothstep(0.9, 0.99, 1.0 - ndv) * 0.45) * (1.0 - 0.45 * kFar);
                 col *= 1.0 - 0.75 * eg; a *= 1.0 - 0.8 * eg; // gece cam renksiz ve şeffaf
                 col += vec3(1.0, 0.9, 0.76) * rimL * eg * 0.7; a = max(a, rimL * eg * 0.65); // kenarlarda ince, sıcak ışık çizgisi
                 float fogF = 1.0 - exp(-uFogD * uFogD * vFogDepth * vFogDepth);
@@ -4895,7 +4895,8 @@ canvas{touch-action:none}
                     for (const k in d.clips) {
                         const c = d.clips[k], bin = atob(c.d), a = new Float32Array(bin.length / 2);
                         for (let i = 0; i < a.length; i++) a[i] = (((bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8)) << 16) >> 16) / 1000;
-                        MOCAP.clips[k] = { fps: c.fps, n: c.n, a, dur: (c.n - 1) / c.fps };
+                        const nb = d.bones.length, dz = a[((c.n - 1) * nb) * 3 + 2] - a[2], dx = a[((c.n - 1) * nb) * 3] - a[0];
+                        MOCAP.clips[k] = { fps: c.fps, n: c.n, a, dur: (c.n - 1) / c.fps, v: Math.hypot(dx, dz) / Math.max(.1, (c.n - 1) / c.fps) };
                     }
                     MOCAP.ok = true;
                 } catch (e) { console.warn('Hareket kayıtları açılamadı', e); }
@@ -5511,7 +5512,19 @@ canvas{touch-action:none}
                 if (MOCAP.ok) {
                     if (G.gest && G.gest.mocap && (G.gw > .2 || !MOVE.onDeck)) { mxStop(.25); G.gest = null; }
                     if (inWater && !airborne) { if (G.prone > .5) { mxPlay('Swimming', { loop: true, water: true, ground: false, fade: .5 }); if (MOCAP.cur) MOCAP.cur.rate = .85 + .15 * Math.min(2, spd); } else mxPlay('Treading Water', { loop: true, water: true, ground: false, fade: .5 }); }
-                    else if (MOCAP.cur && MOCAP.cur.water) mxStop(.35);
+                    else if (MOCAP.cur && MOCAP.cur.water) { mxStop(.35); if (MOVE.onDeck && G.swim > .3) mxPlay('Swimming To Edge', { from: 2.2, fade: .3 }); }
+                    // dalış: atlayış ve düşüş kaydı; suda uzun durunca arada sırtüstü süzülme
+                    if (airborne) mxPlay(MOVE.vy > 0 ? 'Jumping Down' : 'Falling', { loop: true, ground: false, fade: .2, from: MOVE.vy > 0 ? .4 : 1 });
+                    if (inWater && !airborne && G.prone < .3) { G.flT = (G.flT || 0) + dt; if (G.flT > 9 && MOCAP.cur && MOCAP.cur.name === 'Treading Water') { mxPlay('Floating', { loop: true, water: true, ground: false, fade: .8 }); G.flT = -6; } } else G.flT = 0;
+                    // yürüyüş/koşu kayıtları: hız eşlemeli (ayak kaymaz), arada karakterli yürüyüş stilleri
+                    if (MOVE.onDeck && !G.gest && G.swim < .1 && G.gw > .35) {
+                        const mv = Math.abs(MOVE.speed) / (S * sc), run = G.run > .55;
+                        G.walkT = (G.walkT || 0) + dt; if (!run && G.walkT > 10 && !G.style) { const r = Math.random(); G.style = r < .6 ? 'Strut Walking' : r < .85 ? 'Drunk Walk' : 'Scary Clown Walk'; G.styleT = 6; }
+                        if (G.style) { G.styleT -= dt; if (G.styleT <= 0 || run) { G.style = null; G.walkT = 0; } }
+                        const name = run ? (Math.abs(MOVE.turn) > 1.6 ? 'Running To Turn' : 'Running') : (G.style || null);
+                        if (name) { mxPlay(name, { loop: true, fade: .35 }); if (MOCAP.cur && MOCAP.cur.name === name) MOCAP.cur.rate = Math.max(.6, Math.min(1.7, mv / Math.max(.4, MOCAP.cur.c.v || 1.3))); }
+                        else if (MOCAP.cur && MOCAP.cur.loop && !MOCAP.cur.water) mxStop(.35);
+                    } else if (MOCAP.cur && MOCAP.cur.loop && !MOCAP.cur.water && !airborne) mxStop(.35);
                     mxApply(dt);
                 }
 
@@ -5966,7 +5979,7 @@ canvas{touch-action:none}
             } else {
                 // yerinde dönerken biraz daha hızlı, yürürken daha geniş yay (insan gibi)
                 const maxTurn = 1.55 - 0.35 * Math.min(1, Math.abs(MOVE.speed) / top);
-                [MOVE.turn, MOVE.vT] = smoothDamp(MOVE.turn, -x * maxTurn, MOVE.vT, x === 0 ? 0.12 : 0.22, dt);
+                [MOVE.turn, MOVE.vT] = smoothDamp(MOVE.turn, -x * maxTurn, MOVE.vT, x === 0 ? 0.28 : 0.38, dt); // v35 · dönüş yumuşakça hızlanır ve yavaşlar
                 MOVE.head += MOVE.turn * dt; MOVE.headV = MOVE.turn;
                 goal = f * top * (f < 0 ? 0.55 : 1);
             }
@@ -6227,7 +6240,7 @@ canvas{touch-action:none}
                 }
                 // açılar ve mesafe: kritik sönümlü yaylar. Büyük açı farkında (kullanıcı başka yöne baktıktan sonra) daha sakin döner.
                 const yawGap = Math.abs(wrapA(CAM.yawT - CAM.yaw));
-                [CAM.yaw, CAM.yawV] = smoothDamp(CAM.yaw, CAM.yaw + wrapA(CAM.yawT - CAM.yaw), CAM.yawV, user ? 0.07 : (!CAM.lock ? 0.045 : 0.28), dt); // v34 · serbestken kamera ruhla eş zamanlı döner
+                [CAM.yaw, CAM.yawV] = smoothDamp(CAM.yaw, CAM.yaw + wrapA(CAM.yawT - CAM.yaw), CAM.yawV, user ? 0.07 : (!CAM.lock ? 0.11 : 0.28), dt); // v34 · serbestken kamera ruhla eş zamanlı döner
                 CAM.yaw = wrapA(CAM.yaw); CAM.yawT = CAM.yaw + wrapA(CAM.yawT - CAM.yaw);
                 [CAM.pitch, CAM.pitchV] = smoothDamp(CAM.pitch, CAM.pitchT, CAM.pitchV, user ? 0.07 : 0.2, dt);
                 const distGoal = CAM.distT * (1 + 0.16 * spK) * (cameraMode === 3 ? 0.95 : 1);
